@@ -239,7 +239,8 @@ mount_additional_dirs() {
 run_container() {
     local container_name="$1"
     local -n extra_dirs_to_mount=$2
-    shift 2
+    local tool="$3"
+    shift 3
 
     # Check if first arg is "shell" mode
     local shell_mode=false
@@ -306,41 +307,50 @@ run_container() {
         --env "HISTFILE=/home/agent/.shell_history/zsh_history"
     )
 
-    # Use Docker named volume for Claude config (like Anthropic's devcontainer)
-    local claude_volume_name="agentbox-claude-${container_name#agentbox-}"
+    # Use Docker named volume for tool config
+    local tool_volume_name="agentbox-${tool}-${container_name#agentbox-}"
+    local tool_config_dir
+    local host_config_dir
+
+    if [[ "$tool" == "opencode" ]]; then
+        tool_config_dir="/home/agent/.config/opencode"
+        host_config_dir="${HOME}/.config/opencode"
+    else
+        tool_config_dir="/home/agent/.claude"
+        host_config_dir="${HOME}/.claude"
+    fi
 
     # Check if volume exists and initialize if needed
-    if ! docker volume inspect "$claude_volume_name" &>/dev/null; then
-        log_info "Creating Claude CLI volume and copying authentication from global config"
-        docker volume create "$claude_volume_name" &>/dev/null
+    if ! docker volume inspect "$tool_volume_name" &>/dev/null; then
+        log_info "Creating ${tool} volume and copying configuration from global config"
+        docker volume create "$tool_volume_name" &>/dev/null
 
-        # Initialize volume with global Claude config if it exists
+        # Initialize volume with global config if it exists
         # Run as root to ensure correct ownership regardless of host file permissions
         local uid=$(id -u)
         local gid=$(id -g)
 
-        if [[ -d "${HOME}/.claude" ]]; then
+        if [[ -d "${host_config_dir}" ]]; then
             docker run --rm \
-                -v "${HOME}/.claude:/source:ro" \
-                -v "${claude_volume_name}:/dest" \
+                -v "${host_config_dir}:/source:ro" \
+                -v "${tool_volume_name}:/dest" \
                 --user root \
                 "$IMAGE_NAME" \
                 sh -c "cp -r /source/* /dest/ 2>/dev/null; chown -R ${uid}:${gid} /dest"
         else
             docker run --rm \
-                -v "${claude_volume_name}:/dest" \
+                -v "${tool_volume_name}:/dest" \
                 --user root \
                 "$IMAGE_NAME" \
                 chown -R ${uid}:${gid} /dest
         fi
     fi
 
-    mount_opts+=(-v "${claude_volume_name}:/home/agent/.claude")
+    mount_opts+=(-v "${tool_volume_name}:${tool_config_dir}")
 
-    # Set Claude config directory environment variable
-    mount_opts+=(--env "CLAUDE_CONFIG_DIR=/home/agent/.claude")
+    mount_opts+=(--env "TOOL=$tool")
 
-    log_info "Claude CLI configuration mounted"
+    log_info "${tool} configuration mounted"
 
     # Mount host direnv approvals for translation if project has .envrc
     if [[ -f "$PROJECT_DIR/.envrc" ]]; then
@@ -360,13 +370,18 @@ run_container() {
             container_cmd=("${cmd_args[@]:-/bin/zsh}")
         fi
     else
-        # Run claude through zsh to get proper environment
-        # Always include --dangerously-skip-permissions, append any additional flags
-        local claude_cmd="claude --dangerously-skip-permissions"
-        if [[ ${#cmd_args[@]} -gt 0 ]]; then
-            claude_cmd="$claude_cmd ${cmd_args[*]}"
+        # Run tool through zsh to get proper environment
+        local tool_cmd
+        if [[ "$tool" == "opencode" ]]; then
+            tool_cmd="opencode"
+        else
+            tool_cmd="claude --dangerously-skip-permissions"
         fi
-        container_cmd=(zsh -c "source ~/.zshrc && exec $claude_cmd")
+
+        if [[ ${#cmd_args[@]} -gt 0 ]]; then
+            tool_cmd="$tool_cmd ${cmd_args[*]}"
+        fi
+        container_cmd=(zsh -c "source ~/.zshrc && exec $tool_cmd")
     fi
 
     local env_file_args=()
@@ -421,6 +436,7 @@ Usage:
 
 Options:
     -h, --help              Show this help message
+    --tool TOOL             Choose tool: claude (default) or opencode
     -p PORT                 Forward a port from host to container (can be used multiple times)
     --cleanup               Remove AgentBox image and cached data
     --rebuild               Force rebuild of the image
@@ -437,6 +453,7 @@ Commands:
 
 Examples:
     agentbox                            # Start Claude CLI for current project
+    agentbox --tool opencode            # Start OpenCode instead of Claude
     agentbox -p 3002                    # Forward port 3002
     agentbox -p 3002:8080               # Map host port 3002 to container port 8080
     agentbox shell                      # Start interactive shell instead of Claude
@@ -446,6 +463,7 @@ Examples:
     agentbox --cleanup                  # Remove image and optionally cached data
     agentbox --rebuild                  # Force rebuild image
     agentbox ssh-init                   # Set up SSH for AgentBox
+    AGENTBOX_TOOL=opencode agentbox     # Use env var to select tool
 
 Containers are ephemeral and automatically removed when you exit.
 Package caches and shell history persist between sessions.
@@ -529,6 +547,7 @@ main() {
     local cmd_args=()
     declare -a ports=()
     local extra_dirs=()
+    local tool="${AGENTBOX_TOOL:-claude}"
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -562,6 +581,15 @@ main() {
                 extra_dirs+=("$1")
                 shift
                 ;;
+            --tool)
+                shift
+                if [[ -z "${1:-}" ]]; then
+                    log_error "--tool requires a value (claude or opencode)"
+                    exit 1
+                fi
+                tool="$1"
+                shift
+                ;;
             shell)
                 shell_mode=true
                 shift
@@ -584,6 +612,12 @@ main() {
                 ;;
         esac
     done
+
+    # Validate tool selection
+    if [[ "$tool" != "claude" && "$tool" != "opencode" ]]; then
+        log_error "Invalid tool: $tool (must be 'claude' or 'opencode')"
+        exit 1
+    fi
 
     # Check Docker
     check_docker
@@ -630,12 +664,12 @@ main() {
     # Run or attach to container
     if [[ "$shell_mode" == "true" ]]; then
         if [[ "$admin_mode" == "true" ]]; then
-            run_container "$container_name" validated_dirs "shell" "--admin" "${cmd_args[@]}"
+            run_container "$container_name" validated_dirs "$tool" "shell" "--admin" "${cmd_args[@]}"
         else
-            run_container "$container_name" validated_dirs "shell" "${cmd_args[@]}"
+            run_container "$container_name" validated_dirs "$tool" "shell" "${cmd_args[@]}"
         fi
     else
-        run_container "$container_name" validated_dirs "${cmd_args[@]}"
+        run_container "$container_name" validated_dirs "$tool" "${cmd_args[@]}"
     fi
 }
 

@@ -7,6 +7,7 @@ A Docker-based development environment for running Claude CLI in a more safe, is
 ## Features
 
 - **Shares project directory with host**: Maps a volume with the source code so that you can see and modify the agent's changes on the host machine - just like if you were running Claude without a container.
+- **Multi-Tool Support**: Choose between Claude Code (default) or OpenCode via `--tool` flag or `AGENTBOX_TOOL` env var
 - **Multi-Directory Support**: Mount additional project directories for cross-project development
 - **Unified Development Environment**: Single Docker image with Python, Node.js, Java, and Shell support
 - **Automatic Rebuilds**: Detects changes to Dockerfile/entrypoint and rebuilds automatically
@@ -34,6 +35,12 @@ A Docker-based development environment for running Claude CLI in a more safe, is
 # Start Claude CLI in container (--dangerously-skip-permissions is automatically included)
 agentbox
 
+# Use OpenCode instead of Claude
+agentbox --tool opencode
+
+# Or set via environment variable
+AGENTBOX_TOOL=opencode agentbox
+
 # Show available commands
 agentbox --help
 
@@ -42,7 +49,7 @@ agentbox --help
 agentbox -c
 
 # Mount additional directories for multi-project access
-agentbox --add-dir ~/proj1 --add-dir ~/proj2 
+agentbox --add-dir ~/proj1 --add-dir ~/proj2
 
 # Start shell with sudo privileges
 agentbox shell --admin
@@ -50,6 +57,8 @@ agentbox shell --admin
 # Set up SSH keys for AgentBox
 agentbox ssh-init
 ```
+
+**Note**: Tool selection via `--tool` flag takes precedence over the `AGENTBOX_TOOL` environment variable. Some flags like `--add-dir` are Claude-specific and may not work with other tools.
 
 ## How It Works
 
@@ -68,6 +77,7 @@ Persistent data (survives container removal):
   Cache: ~/.cache/agentbox/agentbox-<hash>/
   History: ~/.agentbox/projects/agentbox-<hash>/history/
   Claude: Docker volume agentbox-claude-<hash>
+  OpenCode: Docker volume agentbox-opencode-<hash>
 ```
 
 ## Languages and Tools
@@ -79,6 +89,7 @@ The unified Docker image includes:
 - **Java**: Latest LTS via SDKMAN with Gradle
 - **Shell**: Zsh (default) and Bash with common utilities
 - **Claude CLI**: Pre-installed with per-project authentication
+- **OpenCode**: Pre-installed as an alternative AI coding tool
 
 ## Authenticating to Git or other SCC Providers
 
@@ -145,9 +156,13 @@ Package manager caches are stored in `~/.cache/agentbox/<container-name>/`:
 ### Shell History
 Zsh history is preserved in `~/.agentbox/projects/<container-name>/history`
 
-### Claude CLI Authentication
-Authentication data is stored in Docker named volumes (`agentbox-claude-<hash>`), providing:
-- Per-project Claude CLI configuration
+### Tool Authentication
+Authentication data is stored in Docker named volumes:
+- Claude: `agentbox-claude-<hash>` mounted at `~/.claude`
+- OpenCode: `agentbox-opencode-<hash>` mounted at `~/.config/opencode`
+
+Each tool maintains:
+- Per-project configuration
 - Persistent authentication across container restarts
 - Isolation between different projects
 
@@ -156,17 +171,11 @@ Authentication data is stored in Docker named volumes (`agentbox-claude-<hash>`)
 ### Listing Volumes
 ```bash
 # List all AgentBox volumes
-docker volume ls | grep agentbox-claude
+docker volume ls | grep agentbox
 ```
 
 ### Cleanup
 ```bash
-# Remove specific project's authentication
-docker volume rm agentbox-claude-<hash>
-
-# Remove all AgentBox volumes (clears all authentication)
-docker volume ls -q | grep agentbox-claude | xargs docker volume rm
-
 # Full cleanup (removes image and optionally cached data)
 agentbox --cleanup
 ```
