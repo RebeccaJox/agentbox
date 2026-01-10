@@ -17,7 +17,7 @@ AgentBox is a simplified replacement for ClaudeBox. The user was maintaining pat
 
 2. **Hash-Based Naming**: Container names use SHA256 hash of project directory path (first 12 chars) to ensure uniqueness and avoid conflicts.
 
-3. **Volume Strategy**: Claude CLI config uses Docker named volumes (not bind mounts) to avoid permission issues. Initialized from `~/.claude` if it exists.
+3. **Bind Over Volume**: Claude CLI and OpenCode use bind mounts to host directories.
 
 4. **SSH Implementation**: Currently mounts `~/.agentbox/ssh/` directory directly (not true SSH agent forwarding). Future improvement could use Docker's `--ssh` flag for better security.
 
@@ -53,7 +53,9 @@ $PROJECT_DIR            # Project directory (mounted at full host path)
 /home/agent/.m2         # Maven cache
 /home/agent/.gradle     # Gradle cache
 /home/agent/.shell_history  # History directory (HISTFILE env var points to zsh_history inside)
-/home/agent/.claude     # Claude config (Docker volume)
+/home/agent/.claude     # Claude config
+/home/agent/.config/opencode  # OpenCode config
+/home/agent/.local/share/opencode  # OpenCode auth
 ```
 
 ## Testing Status
@@ -114,7 +116,7 @@ The `agentbox` script has these key functions:
 
 2. **Path Hashing**: Container names use first 12 chars of SHA256(project_path) - collision risk is negligible
 
-3. **Volume Naming**: `agentbox-claude-<hash>` pattern ensures per-project isolation
+3. **Container Naming**: `agentbox-<hash>` pattern ensures per-project container isolation (separate caches and history, but shared tool authentication)
 
 4. **Shell Mode**: When using `shell` command, execution goes through zsh even for bash (ensures environment is loaded)
 

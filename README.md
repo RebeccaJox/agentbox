@@ -58,7 +58,7 @@ agentbox shell --admin
 agentbox ssh-init
 ```
 
-**Note**: Tool selection via `--tool` flag takes precedence over the `AGENTBOX_TOOL` environment variable. Claude uses per-project authentication (Docker volumes) while OpenCode shares authentication across all projects (bind mounts).
+**Note**: Tool selection via `--tool` flag takes precedence over the `AGENTBOX_TOOL` environment variable.
 
 ## How It Works
 
@@ -76,8 +76,8 @@ Single Dockerfile → Build once → agentbox:latest image
 Persistent data (survives container removal):
   Cache: ~/.cache/agentbox/agentbox-<hash>/
   History: ~/.agentbox/projects/agentbox-<hash>/history/
-  Claude: Docker volume agentbox-claude-<hash> (per-project isolation)
-  OpenCode: Direct bind mounts to ~/.config/opencode and ~/.local/share/opencode (shared across projects)
+  Claude: ~/.claude
+  OpenCode: ~/.config/opencode and ~/.local/share/opencode
 ```
 
 ## Languages and Tools
@@ -158,39 +158,23 @@ Zsh history is preserved in `~/.agentbox/projects/<container-name>/history`
 
 ### Tool Authentication
 
-**Claude CLI**: Uses Docker named volumes for per-project isolation
-- Volume: `agentbox-claude-<hash>` mounted at `~/.claude`
-- Each project directory gets its own isolated authentication
-- Initialized from `~/.claude` on first run
+Both tools use bind mounts to share authentication across all AgentBox projects:
 
-**OpenCode**: Uses bind mounts to host directories (shared across all projects)
+**Claude CLI**:
+- `~/.claude` mounted at `/home/agent/.claude`
+
+**OpenCode**:
 - Config: `~/.config/opencode` mounted at `/home/agent/.config/opencode`
 - Auth: `~/.local/share/opencode` mounted at `/home/agent/.local/share/opencode`
-- Same authentication used across all AgentBox projects
 
-## Volume Management
+## Cleanup
 
-### Listing Volumes
 ```bash
-# List all AgentBox Claude volumes
-docker volume ls | grep agentbox-claude
-```
-
-### Cleanup
-```bash
-# Remove specific project's Claude authentication
-docker volume rm agentbox-claude-<hash>
-
-# Remove all AgentBox Claude volumes
-docker volume ls -q | grep agentbox-claude | xargs docker volume rm
-
 # Full cleanup (removes image and optionally cached data)
 agentbox --cleanup
 ```
 
-**Note**:
-- Claude volumes only affect Claude authentication - your project files remain untouched
-- OpenCode uses bind mounts to `~/.config/opencode` and `~/.local/share/opencode` - delete these directories directly if needed
+**Note**: Authentication is stored in your home directory (`~/.claude`, `~/.config/opencode`, `~/.local/share/opencode`) and is not affected by cleanup. Your project files also remain untouched.
 
 ## Advanced Usage
 
