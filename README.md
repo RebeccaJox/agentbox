@@ -50,6 +50,13 @@ agentbox --tool opencode
 # Or set via environment variable
 AGENTBOX_TOOL=opencode agentbox
 
+# To build agentbox with a specific version of claude code
+# additionally disable auto-updating in the claude settings.json with "DISABLE_AUTOUPDATER": "1" 
+CLAUDE_CODE_VERSION=1.2.3 agentbox --rebuild
+
+# To build agentbox with a specific version of opencode
+OPENCODE_VERSION=1.2.3 agentbox --rebuild
+
 # Show available commands
 agentbox --help
 
@@ -103,7 +110,9 @@ The unified Docker image includes:
 ## Authenticating to Git or other SCC Providers
 
 ### GitHub
+
 The `gh` tool is included in the image and can be used for all GitHub operations. My recommendation:
+
 - Visit this link to configure a [fine-grained access-token](https://github.com/settings/personal-access-tokens/new?name=MyRepo-AI&description=For%20AI%20Agent%20Usage&contents=write&pull_requests=write&issues=write) with a sensible set of permissions predefined.
 - On that page, restrict the token to the project repository.
 - Create a .env file at the root of your project repository with entry `GH_TOKEN=<token>`
@@ -112,6 +121,7 @@ The `gh` tool is included in the image and can be used for all GitHub operations
 You or your agent should convert ssh git remotes to https, ssh remotes don't work with tokens.
 
 ### GitLab
+
  The `glab` tool is included in the image. You can use it with a GitLab token for API operations, but not for git operations as far as I know. So for GitLab I recommend the SSH configuration detailed below.
 
 ## Git Configuration
@@ -128,12 +138,15 @@ agentbox ssh-init
 ```
 
 This will:
+
 1. Create ~/.agentbox/ssh/ directory
 2. Copy your known_hosts for host verification
 3. Generate a new Ed25519 key pair (if preferred, delete them and manually place your desired SSH keys in `~/.agentbox/ssh/`).
 
 ### Environment Variables
+
 Environment variables are loaded from `.env` files in this order (later overrides earlier):
+
 1. `~/.agentbox/.env` (global)
 2. `<project-dir>/.env` (project-specific)
 
@@ -146,6 +159,7 @@ Due to [Claude Code bug #6130](https://github.com/anthropics/claude-code/issues/
 **Workaround options:**
 
 1. **Enable individual MCP servers interactively:**
+
    ```bash
    agentbox shell
    claude
@@ -156,13 +170,16 @@ Due to [Claude Code bug #6130](https://github.com/anthropics/claude-code/issues/
 ## Data Persistence
 
 ### Package Caches
+
 Package manager caches are stored in `~/.cache/agentbox/<container-name>/`:
+
 - npm packages: `~/.cache/agentbox/<container-name>/npm`
 - pip packages: `~/.cache/agentbox/<container-name>/pip`
 - Maven artifacts: `~/.cache/agentbox/<container-name>/maven`
 - Gradle cache: `~/.cache/agentbox/<container-name>/gradle`
 
 ### Shell History
+
 Zsh history is preserved in `~/.agentbox/projects/<container-name>/history`
 
 ### Tool Authentication
@@ -170,15 +187,18 @@ Zsh history is preserved in `~/.agentbox/projects/<container-name>/history`
 Both tools use bind mounts to share authentication across all AgentBox projects:
 
 **Claude CLI**:
+
 - `~/.claude` mounted at `/home/agent/.claude`
 
 **OpenCode**:
+
 - Config: `~/.config/opencode` mounted at `/home/agent/.config/opencode`
 - Auth: `~/.local/share/opencode` mounted at `/home/agent/.local/share/opencode`
 
 ## Advanced Usage
 
 ### Running One-Off Commands
+
 If you need to run a single command in the containerized environment without starting Claude CLI or an interactive shell:
 
 ```bash
@@ -187,23 +207,29 @@ agentbox npm test
 ```
 
 ### Rebuild Control
+
 ```bash
 # Force rebuild the Docker image
 agentbox --rebuild
 ```
 
 The image automatically rebuilds when:
+
 - Dockerfile or entrypoint.sh changes
 - Image is older than 48 hours (to get latest tool versions)
 
 ## Tool / Dependency Versions
+
 The Dockerfile is configured to pull the latest stable version of each tool (NVM, GitLab CLI, etc.) during the build process. This makes maintenance easy and ensures that we always use current software. It also means that rebuilding the Docker image may automatically result in newer versions of tools being installed, which could introduce unexpected behavior or breaking changes. If you require specific tool versions, consider pinning them in the Dockerfile.
 
 ## Alternatives
+
 ### Anthropic DevContainer
+
 Anthropic offers a [devcontainer](https://github.com/anthropics/claude-code/tree/main/.devcontainer) which achieves a similar goal. If you like devcontainers, that's a good option. Unfortunately, I find that devcontainers sometimes have weird bugs, problematic support in IntelliJ/Mac, or they are just more cumbersome to use (try switching to a recent project with a shortcut, for example). I don't want to force people to use a devcontainer if what they really want is safe YOLO-mode isolation - the simpler solution to the problem is just Docker, hence, this project.
 
 ### Comparison with ClaudeBox
+
 AgentBox began as a simplified replacement for [ClaudeBox](https://github.com/RchGrav/claudebox). I liked the ClaudeBox project, but its complexity caused a lot of bugs and I found myself maintaning my own fork with my not-yet-merged PRs. It became easier for me to build something leaner for my own needs. Comparison:
 
 | Feature | AgentBox | ClaudeBox |
@@ -214,6 +240,7 @@ AgentBox began as a simplified replacement for [ClaudeBox](https://github.com/Rc
 | Setup | Automatic | Manual configuration |
 
 ## Support and Contributing
+
 I make no guarantee to support this project in the future, however the history is positive: I've actively supported it since September 2025. Feel free to create issues and submit PRs. The project is designed to be understandable enough that if you need specific custom changes which we don't want centrally, you can fork or just make them locally for yourself.
 
 If you do contribute, consider that AgentBox is designed to be simple and maintainable. The value of new features will always be weighed against the added complexity. Try to find the simplest possible way to get things done and control the AI's desire to write such bloated doco.

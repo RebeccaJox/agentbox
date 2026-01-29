@@ -1,6 +1,10 @@
 # AgentBox - Simplified multi-language development environment for Claude
 FROM debian:trixie
 
+# Define build arguments with default values (empty = latest)
+ARG CLAUDE_CODE_VERSION=""
+ARG OPENCODE_VERSION=""
+
 # Prevent interactive prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=en_US.UTF-8
@@ -202,7 +206,8 @@ USER ${USERNAME}
 ARG BUILD_TIMESTAMP=unknown
 RUN bash -c "source $NVM_DIR/nvm.sh && \
     npm install -g \
-        @anthropic-ai/claude-code opencode-ai && \
+        @anthropic-ai/claude-code${CLAUDE_CODE_VERSION:+@}${CLAUDE_CODE_VERSION} \
+        opencode-ai${OPENCODE_VERSION:+@}${OPENCODE_VERSION} && \
     # Verify both tools installed correctly
     which claude && claude --version && \
     which opencode && opencode --version"
