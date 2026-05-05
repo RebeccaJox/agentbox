@@ -79,8 +79,7 @@ calculate_hash() {
     fi
 }
 
-# Get container name for current project
-get_container_name() {
+get_project_id() {
     local project_hash=$(echo -n "$PROJECT_DIR" | sha256sum | cut -c1-12)
     echo "${CONTAINER_PREFIX}-${project_hash}"
 }
@@ -254,7 +253,7 @@ mount_additional_dirs() {
 
 # Run container with --rm (ephemeral)
 run_container() {
-    local container_name="$1"
+    local project_id="$1"
     local -n extra_dirs_to_mount=$2
     local tool="$3"
     local ignore_dot_env="$4"
@@ -325,7 +324,7 @@ run_container() {
     fi
 
     # Mount cache directories for package managers
-    local cache_dir="${HOME}/.cache/agentbox/${container_name}"
+    local cache_dir="${HOME}/.cache/agentbox/${project_id}"
     mkdir -p "${cache_dir}/npm" "${cache_dir}/pip" "${cache_dir}/maven" "${cache_dir}/gradle"
 
     mount_opts+=(
@@ -336,7 +335,7 @@ run_container() {
     )
 
     # Mount per-project persistent data
-    local project_data_dir="${HOME}/.agentbox/projects/${container_name}"
+    local project_data_dir="${HOME}/.agentbox/projects/${project_id}"
     local history_dir="${project_data_dir}/history"
     mkdir -p "${history_dir}"
 
@@ -477,8 +476,9 @@ run_container() {
     fi
 
     # Run ephemeral container with --rm
+    local instance_id=$(head -c6 /dev/urandom | xxd -p)
     $RUNTIME run -it --rm \
-        --name "$container_name" \
+        --name "${project_id}-${instance_id}" \
         --hostname "agentbox-$PROJECT_NAME" \
         "${runtime_args[@]}" \
         "${host_args[@]}" \
@@ -684,8 +684,7 @@ main() {
     RUNTIME=$(check_runtime)
     log_info "Using container runtime: $RUNTIME"
 
-    # Get container name for current project
-    local container_name=$(get_container_name)
+    local project_id=$(get_project_id)
 
     # Validate dir paths (batch all errors so user sees all problems at once)
     local project_realpath
@@ -720,12 +719,12 @@ main() {
     # Run or attach to container
     if [[ "$shell_mode" == "true" ]]; then
         if [[ "$admin_mode" == "true" ]]; then
-            run_container "$container_name" validated_dirs "$tool" "$ignore_dot_env" "$docker_mount" env_vars "shell" "--admin" "${cmd_args[@]}"
+            run_container "$project_id" validated_dirs "$tool" "$ignore_dot_env" "shell" "--admin" "${cmd_args[@]}"
         else
-            run_container "$container_name" validated_dirs "$tool" "$ignore_dot_env" "$docker_mount" env_vars "shell" "${cmd_args[@]}"
+            run_container "$project_id" validated_dirs "$tool" "$ignore_dot_env" "shell" "${cmd_args[@]}"
         fi
     else
-        run_container "$container_name" validated_dirs "$tool" "$ignore_dot_env" "$docker_mount" env_vars "${cmd_args[@]}"
+        run_container "$project_id" validated_dirs "$tool" "$ignore_dot_env" "${cmd_args[@]}"
     fi
 }
 
