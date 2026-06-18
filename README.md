@@ -236,11 +236,37 @@ Both tools use bind mounts to share authentication across all AgentBox projects:
 **Claude CLI**:
 
 - `~/.claude` mounted at `/home/agent/.claude`
+- `~/.claude.json` mounted at `/home/agent/.claude.json` (OAuth session, MCP registry, per-project trust). Auto-created as `{}` if missing.
 
 **OpenCode**:
 
 - Config: `~/.config/opencode` mounted at `/home/agent/.config/opencode`
 - Auth: `~/.local/share/opencode` mounted at `/home/agent/.local/share/opencode`
+
+### Per-Project Settings and API Keys
+
+You have three ways to vary tool config per project, listed from least to most isolated:
+
+1. **Native project config files** (no agentbox flag). Both tools natively pick up project-level config:
+   - Claude Code: `<project>/.claude/settings.json` (shared) or `<project>/.claude/settings.local.json` (personal). Overrides `~/.claude/settings.json`.
+   - OpenCode: `<project>/opencode.json` or `<project>/opencode.jsonc`. Overrides `~/.config/opencode/opencode.json`.
+
+2. **Project `.env` for API keys**. AgentBox loads `<project>/.env` automatically. Set `ANTHROPIC_API_KEY`, etc. there. Note that *all* variables in this file become env vars in the container, including any application secrets - the agent (and any process it spawns) can read them.
+
+3. **Config profiles** for full isolation of auth/settings outside the project. Each profile is a directory under `~/.agentbox/profiles/<name>/` containing its own `claude/`, `claude.json`, `opencode/config/`, and `opencode/data/`. When a profile is active, these replace the global `~/.claude`, `~/.claude.json`, `~/.config/opencode`, and `~/.local/share/opencode` mounts. Useful for separating personal vs. work Claude accounts, isolating per-client API keys, or testing config changes without disturbing your global setup.
+
+   ```bash
+   # One-off
+   agentbox --config-profile work
+
+   # Pin a profile to a project (auto-selected whenever you run agentbox in this dir)
+   echo 'AGENTBOX_CONFIG_PROFILE=work' >> .env
+
+   # Or pin globally
+   echo 'AGENTBOX_CONFIG_PROFILE=personal' >> ~/.agentbox/.env
+   ```
+
+   Precedence: `--config-profile` > `<project>/.env` > `~/.agentbox/.env`. Profile directories are auto-created empty; the tool will prompt for login on first use.
 
 ## Advanced Usage
 

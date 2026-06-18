@@ -84,6 +84,55 @@ get_project_id() {
     echo "${CONTAINER_PREFIX}-${project_hash}"
 }
 
+# Read a variable from a .env file without sourcing it (avoids executing arbitrary code).
+# Returns the value of the last assignment, with surrounding quotes stripped.
+read_env_var() {
+    local file="$1"
+    local var="$2"
+    [[ -f "$file" ]] || return 1
+    local line
+    line=$(grep -E "^[[:space:]]*${var}=" "$file" 2>/dev/null | tail -1) || return 1
+    [[ -n "$line" ]] || return 1
+    local value="${line#*=}"
+    # Strip optional surrounding single or double quotes
+    if [[ "$value" =~ ^\"(.*)\"$ ]] || [[ "$value" =~ ^\'(.*)\'$ ]]; then
+        value="${BASH_REMATCH[1]}"
+    fi
+    echo "$value"
+}
+
+# Resolve the active config profile from (in order): CLI flag, project .env, global .env.
+# Validates the profile name to a safe character set.
+resolve_config_profile() {
+    local cli_profile="$1"
+    local profile=""
+
+    if [[ -n "$cli_profile" ]]; then
+        profile="$cli_profile"
+    elif profile=$(read_env_var "$PROJECT_DIR/.env" AGENTBOX_CONFIG_PROFILE); then
+        :
+    elif profile=$(read_env_var "$HOME/.agentbox/.env" AGENTBOX_CONFIG_PROFILE); then
+        :
+    else
+        profile=""
+    fi
+
+    if [[ -n "$profile" && ! "$profile" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        log_error "Invalid profile name: '$profile' (allowed: letters, digits, _, -)"
+        return 1
+    fi
+
+    echo "$profile"
+}
+
+# Ensure a profile directory skeleton exists.
+ensure_profile_dirs() {
+    local profile="$1"
+    local base="${HOME}/.agentbox/profiles/${profile}"
+    mkdir -p "${base}/claude" "${base}/opencode/config" "${base}/opencode/data"
+    echo "$base"
+}
+
 
 # Check if image needs rebuild
 needs_rebuild() {
@@ -258,8 +307,9 @@ run_container() {
     local tool="$3"
     local ignore_dot_env="$4"
     local mount_docker_socket="$5"
-    local -n pass_env_vars=$6
-    shift 6
+    local config_profile="$6"
+    local -n pass_env_vars=$7
+    shift 7
 
     # Check if first arg is "shell" mode
     local shell_mode=false
@@ -345,26 +395,43 @@ run_container() {
         --env "HISTFILE=/home/agent/.shell_history/zsh_history"
     )
 
-    if [[ "$tool" == "opencode" ]]; then
-        local opencode_config_dir="${HOME}/.config/opencode"
-        local opencode_auth_dir="${HOME}/.local/share/opencode"
+    local claude_host_dir opencode_config_host_dir opencode_data_host_dir claude_host_json
+    if [[ -n "$config_profile" ]]; then
+        local profile_base
+        profile_base=$(ensure_profile_dirs "$config_profile")
+        claude_host_dir="${profile_base}/claude"
+        claude_host_json="${profile_base}/claude.json"
+        opencode_config_host_dir="${profile_base}/opencode/config"
+        opencode_data_host_dir="${profile_base}/opencode/data"
+        log_info "Using config profile: ${config_profile} (${profile_base})"
+    else
+        claude_host_dir="${HOME}/.claude"
+        claude_host_json="${HOME}/.claude.json"
+        opencode_config_host_dir="${HOME}/.config/opencode"
+        opencode_data_host_dir="${HOME}/.local/share/opencode"
+    fi
 
-        mkdir -p "$opencode_config_dir"
-        mkdir -p "$opencode_auth_dir"
+    if [[ "$tool" == "opencode" ]]; then
+        mkdir -p "$opencode_config_host_dir"
+        mkdir -p "$opencode_data_host_dir"
 
         mount_opts+=(
-            -v "${opencode_config_dir}:/home/agent/.config/opencode"
-            -v "${opencode_auth_dir}:/home/agent/.local/share/opencode"
+            -v "${opencode_config_host_dir}:/home/agent/.config/opencode"
+            -v "${opencode_data_host_dir}:/home/agent/.local/share/opencode"
         )
 
         log_info "OpenCode configuration and auth mounted"
     else
-        local claude_dir="${HOME}/.claude"
-
-        mkdir -p "$claude_dir"
+        mkdir -p "$claude_host_dir"
+        # Claude Code stores OAuth session + per-project trust + user-scope MCP
+        # registry in ~/.claude.json (in $HOME, not $CLAUDE_CONFIG_DIR). Bind-mount
+        # it so login state persists across ephemeral containers. Bind-mounting a
+        # file requires it to exist on the host first.
+        [[ -f "$claude_host_json" ]] || echo '{}' > "$claude_host_json"
 
         mount_opts+=(
-            -v "${claude_dir}:/home/agent/.claude"
+            -v "${claude_host_dir}:/home/agent/.claude"
+            -v "${claude_host_json}:/home/agent/.claude.json"
             --env "CLAUDE_CONFIG_DIR=/home/agent/.claude"
         )
 
@@ -509,6 +576,11 @@ Options:
     --add-dir DIR               Mount additional directory (can be used multiple times)
     --ignore-dot-env            Do not load .env files as environment variables (still mounted)
     --dangerously-mount-docker  Mount Docker socket (requires Docker Desktop)
+    --config-profile NAME   Use an isolated tool config/auth profile from
+                            ~/.agentbox/profiles/NAME/ instead of the global
+                            ~/.claude and ~/.config/opencode directories.
+                            Can also be set per project via AGENTBOX_CONFIG_PROFILE
+                            in <project>/.env or ~/.agentbox/.env.
 
 Commands:
     shell [--admin]             Start interactive shell instead of Claude CLI
@@ -531,11 +603,16 @@ Examples:
     agentbox -e GH_TOKEN=\$(op read '...')  # Pass env var (e.g. from 1Password)
     agentbox --rebuild                    # Force rebuild image
     agentbox ssh-init                     # Set up SSH for AgentBox
+    agentbox --config-profile work      # Use isolated 'work' profile (separate auth/settings)
     AGENTBOX_TOOL=opencode agentbox       # Use env var to select tool
 
-Environment variables (set in ~/.agentbox/.env):
+Environment variables (set in ~/.agentbox/.env or <project>/.env):
     AGENTBOX_EXTRA_HOSTS    Comma-separated host:ip pairs added to container /etc/hosts
                             Example: gitlab.example.com:host-gateway
+    AGENTBOX_CONFIG_PROFILE Name of a config profile under ~/.agentbox/profiles/
+                            Mounts an isolated set of claude/opencode config and auth
+                            directories. Useful for separating personal vs. work accounts
+                            or per-project API keys. Overridden by --config-profile.
 
 Containers are ephemeral and automatically removed when you exit.
 Package caches and shell history persist between sessions.
@@ -595,6 +672,7 @@ main() {
     local env_vars=()
     local tool="${AGENTBOX_TOOL:-claude}"
     local ignore_dot_env=false
+    local cli_config_profile=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -650,6 +728,15 @@ main() {
                 ignore_dot_env=true
                 shift
                 ;;
+            --config-profile)
+                shift
+                if [[ -z "${1:-}" ]]; then
+                    log_error "--config-profile requires a value"
+                    exit 1
+                fi
+                cli_config_profile="$1"
+                shift
+                ;;
             shell)
                 shell_mode=true
                 shift
@@ -685,6 +772,9 @@ main() {
 
     local project_id=$(get_project_id)
 
+    local config_profile
+    config_profile=$(resolve_config_profile "$cli_config_profile") || exit 1
+
     # Validate dir paths (batch all errors so user sees all problems at once)
     local project_realpath
     project_realpath=$(realpath "$PROJECT_DIR")
@@ -718,12 +808,12 @@ main() {
     # Run or attach to container
     if [[ "$shell_mode" == "true" ]]; then
         if [[ "$admin_mode" == "true" ]]; then
-            run_container "$project_id" validated_dirs "$tool" "$ignore_dot_env" "$docker_mount" env_vars "shell" "--admin" "${cmd_args[@]}"
+            run_container "$project_id" validated_dirs "$tool" "$ignore_dot_env" "$docker_mount" "$config_profile" env_vars "shell" "--admin" "${cmd_args[@]}"
         else
-            run_container "$project_id" validated_dirs "$tool" "$ignore_dot_env" "$docker_mount" env_vars "shell" "${cmd_args[@]}"
+            run_container "$project_id" validated_dirs "$tool" "$ignore_dot_env" "$docker_mount" "$config_profile" env_vars "shell" "${cmd_args[@]}"
         fi
     else
-        run_container "$project_id" validated_dirs "$tool" "$ignore_dot_env" "$docker_mount" env_vars "${cmd_args[@]}"
+        run_container "$project_id" validated_dirs "$tool" "$ignore_dot_env" "$docker_mount" "$config_profile" env_vars "${cmd_args[@]}"
     fi
 }
 
