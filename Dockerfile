@@ -166,6 +166,16 @@ if [[ -n "$PS1" ]] && command -v stty >/dev/null; then
 fi
 EOF
 
+# AgentBox shell indicator - prepends a colored marker to the prompt and sets
+# the terminal title, but only when AGENTBOX_SHELL=1 (set by agentbox shell mode)
+RUN cat >> ~/.zshrc <<'EOF'
+
+if [[ -n "$AGENTBOX_SHELL" ]]; then
+  PROMPT="%F{magenta}agentbox%f $PROMPT"
+  precmd() { print -Pn "\e]0;agentbox\a" }
+fi
+EOF
+
 # Configure git
 RUN git config --global init.defaultBranch main && \
     git config --global pull.rebase false
@@ -218,6 +228,10 @@ RUN curl -fsSL https://claude.ai/install.sh | bash -s stable && \
 
 RUN curl -fsSL https://opencode.ai/install | bash && \
     zsh -i -c 'which opencode && opencode --version'
+
+RUN bash -c "source $NVM_DIR/nvm.sh && \
+    npm install -g --ignore-scripts @earendil-works/pi-coding-agent" && \
+    zsh -i -c 'which pi && pi --version'
 
 # Entrypoint
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

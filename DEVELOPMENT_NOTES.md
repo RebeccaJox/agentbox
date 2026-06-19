@@ -87,6 +87,7 @@ $PROJECT_DIR            # Project directory (mounted at full host path)
 /home/agent/.claude     # Claude config
 /home/agent/.config/opencode  # OpenCode config
 /home/agent/.local/share/opencode  # OpenCode auth
+/home/agent/.pi         # Pi config (PI_CODING_AGENT_DIR=/home/agent/.pi/agent)
 ```
 
 ## Testing Status

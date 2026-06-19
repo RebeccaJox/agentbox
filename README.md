@@ -55,6 +55,7 @@ agentbox --help
 
 - claude code: built-in
 - opencode: built-in
+- pi: built-in
 - any other agents (copilot CLI, Aider, Cursor CLI...): easily add it yourself using the prompt at [docs/prompts/add-tool.md](docs/prompts/add-tool.md).
 
 ### Adding tools
@@ -89,6 +90,9 @@ agentbox
 
 # Use OpenCode instead of Claude
 agentbox --tool opencode
+
+# Use Pi instead of Claude
+agentbox --tool pi
 
 # Or set via environment variable
 AGENTBOX_TOOL=opencode agentbox
@@ -134,6 +138,7 @@ Persistent data (survives container removal):
   History: ~/.agentbox/projects/agentbox-<hash>/history/
   Claude: ~/.claude
   OpenCode: ~/.config/opencode and ~/.local/share/opencode
+  Pi: ~/.pi
 ```
 
 ## Languages and Tools
@@ -146,6 +151,7 @@ The unified container image includes:
 - **Shell**: Zsh (default) and Bash with common utilities
 - **Claude CLI**: Pre-installed with per-project authentication
 - **OpenCode**: Pre-installed as an alternative AI coding tool
+- **Pi**: Pre-installed as an alternative AI coding tool (npm package `@earendil-works/pi-coding-agent`)
 
 ## Authenticating to Git or other SCC Providers
 
@@ -243,17 +249,22 @@ Both tools use bind mounts to share authentication across all AgentBox projects:
 - Config: `~/.config/opencode` mounted at `/home/agent/.config/opencode`
 - Auth: `~/.local/share/opencode` mounted at `/home/agent/.local/share/opencode`
 
+**Pi**:
+
+- Config, auth, and sessions: `~/.pi` mounted at `/home/agent/.pi` (Pi stores everything under `~/.pi/agent/`; `PI_CODING_AGENT_DIR` is set to point at it).
+
 ### Per-Project Settings and API Keys
 
 You have three ways to vary tool config per project, listed from least to most isolated:
 
-1. **Native project config files** (no agentbox flag). Both tools natively pick up project-level config:
+1. **Native project config files** (no agentbox flag). Each tool natively picks up project-level config:
    - Claude Code: `<project>/.claude/settings.json` (shared) or `<project>/.claude/settings.local.json` (personal). Overrides `~/.claude/settings.json`.
    - OpenCode: `<project>/opencode.json` or `<project>/opencode.jsonc`. Overrides `~/.config/opencode/opencode.json`.
+   - Pi: `<project>/.pi/settings.json` and `<project>/AGENTS.md` (or `CLAUDE.md`). Overrides `~/.pi/agent/settings.json`. Note: pi only loads `.pi/*` resources and project extensions after a project trust decision is saved (via `/trust` or `~/.pi/agent/trust.json`); pass `-a`/`--approve` to trust for a one-off run without a prompt.
 
 2. **Project `.env` for API keys**. AgentBox loads `<project>/.env` automatically. Set `ANTHROPIC_API_KEY`, etc. there. Note that *all* variables in this file become env vars in the container, including any application secrets - the agent (and any process it spawns) can read them.
 
-3. **Config profiles** for full isolation of auth/settings outside the project. Each profile is a directory under `~/.agentbox/profiles/<name>/` containing its own `claude/`, `claude.json`, `opencode/config/`, and `opencode/data/`. When a profile is active, these replace the global `~/.claude`, `~/.claude.json`, `~/.config/opencode`, and `~/.local/share/opencode` mounts. Useful for separating personal vs. work Claude accounts, isolating per-client API keys, or testing config changes without disturbing your global setup.
+3. **Config profiles** for full isolation of auth/settings outside the project. Each profile is a directory under `~/.agentbox/profiles/<name>/` containing its own `claude/`, `claude.json`, `opencode/config/`, `opencode/data/`, and `pi/`. When a profile is active, these replace the global `~/.claude`, `~/.claude.json`, `~/.config/opencode`, `~/.local/share/opencode`, and `~/.pi` mounts. Useful for separating personal vs. work Claude accounts, isolating per-client API keys, or testing config changes without disturbing your global setup.
 
    ```bash
    # One-off

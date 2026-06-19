@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # AgentBox - Simplified container environment for Claude development
 # Automatically rebuilds when Dockerfile changes and uses ephemeral containers with persistent caches
+#
+# Supported tools: claude (default), opencode, pi
 
 set -euo pipefail
 
@@ -129,7 +131,7 @@ resolve_config_profile() {
 ensure_profile_dirs() {
     local profile="$1"
     local base="${HOME}/.agentbox/profiles/${profile}"
-    mkdir -p "${base}/claude" "${base}/opencode/config" "${base}/opencode/data"
+    mkdir -p "${base}/claude" "${base}/opencode/config" "${base}/opencode/data" "${base}/pi"
     echo "$base"
 }
 
@@ -395,7 +397,7 @@ run_container() {
         --env "HISTFILE=/home/agent/.shell_history/zsh_history"
     )
 
-    local claude_host_dir opencode_config_host_dir opencode_data_host_dir claude_host_json
+    local claude_host_dir opencode_config_host_dir opencode_data_host_dir claude_host_json pi_host_dir
     if [[ -n "$config_profile" ]]; then
         local profile_base
         profile_base=$(ensure_profile_dirs "$config_profile")
@@ -403,12 +405,14 @@ run_container() {
         claude_host_json="${profile_base}/claude.json"
         opencode_config_host_dir="${profile_base}/opencode/config"
         opencode_data_host_dir="${profile_base}/opencode/data"
+        pi_host_dir="${profile_base}/pi"
         log_info "Using config profile: ${config_profile} (${profile_base})"
     else
         claude_host_dir="${HOME}/.claude"
         claude_host_json="${HOME}/.claude.json"
         opencode_config_host_dir="${HOME}/.config/opencode"
         opencode_data_host_dir="${HOME}/.local/share/opencode"
+        pi_host_dir="${HOME}/.pi"
     fi
 
     if [[ "$tool" == "opencode" ]]; then
@@ -421,6 +425,15 @@ run_container() {
         )
 
         log_info "OpenCode configuration and auth mounted"
+    elif [[ "$tool" == "pi" ]]; then
+        mkdir -p "$pi_host_dir"
+
+        mount_opts+=(
+            -v "${pi_host_dir}:/home/agent/.pi"
+            --env "PI_CODING_AGENT_DIR=/home/agent/.pi/agent"
+        )
+
+        log_info "Pi configuration and auth mounted"
     else
         mkdir -p "$claude_host_dir"
         # Claude Code stores OAuth session + per-project trust + user-scope MCP
@@ -440,6 +453,11 @@ run_container() {
 
     # Set tool environment variable
     mount_opts+=(--env "TOOL=$tool")
+
+    # Mark shell mode so the container prompt can indicate agentbox context
+    if [[ "$shell_mode" == "true" ]]; then
+        mount_opts+=(--env "AGENTBOX_SHELL=1")
+    fi
 
     # Mount host direnv approvals for translation if project has .envrc
     if [[ -f "$PROJECT_DIR/.envrc" ]]; then
@@ -463,6 +481,8 @@ run_container() {
         local tool_cmd
         if [[ "$tool" == "opencode" ]]; then
             tool_cmd="opencode"
+        elif [[ "$tool" == "pi" ]]; then
+            tool_cmd="pi"
         else
             tool_cmd="claude --dangerously-skip-permissions"
         fi
@@ -569,7 +589,7 @@ Usage:
 
 Options:
     -h, --help                  Show this help message
-    --tool TOOL                 Choose tool: claude (default) or opencode
+    --tool TOOL                 Choose tool: claude (default), opencode, or pi
     -e KEY=VALUE                Pass environment variable to container (can be used multiple times)
     -p PORT                     Forward a port from host to container (can be used multiple times)
     --rebuild                   Force rebuild of the image
@@ -578,22 +598,23 @@ Options:
     --dangerously-mount-docker  Mount Docker socket (requires Docker Desktop)
     --config-profile NAME   Use an isolated tool config/auth profile from
                             ~/.agentbox/profiles/NAME/ instead of the global
-                            ~/.claude and ~/.config/opencode directories.
+                            ~/.claude, ~/.config/opencode, and ~/.pi directories.
                             Can also be set per project via AGENTBOX_CONFIG_PROFILE
                             in <project>/.env or ~/.agentbox/.env.
 
 Commands:
-    shell [--admin]             Start interactive shell instead of Claude CLI
+    shell [--admin]             Start interactive shell instead of the selected tool
     ssh-init                    Initialize SSH directory for AgentBox
 
-    If no command is provided, Claude CLI will be started automatically.
-    Use 'shell' command to get a shell instead of Claude CLI.
+    If no command is provided, the selected tool (default: claude) will be started automatically.
+    Use 'shell' command to get a shell instead of the tool.
     Use 'shell --admin' to get a shell with sudo privileges.
     Other commands will be executed inside the container.
 
 Examples:
     agentbox                              # Start Claude CLI for current project
     agentbox --tool opencode              # Start OpenCode instead of Claude
+    agentbox --tool pi                    # Start Pi instead of Claude
     agentbox -p 3002                      # Forward port 3002
     agentbox -p 3002:8080                 # Map host port 3002 to container port 8080
     agentbox shell                        # Start interactive shell instead of Claude
@@ -605,12 +626,13 @@ Examples:
     agentbox ssh-init                     # Set up SSH for AgentBox
     agentbox --config-profile work      # Use isolated 'work' profile (separate auth/settings)
     AGENTBOX_TOOL=opencode agentbox       # Use env var to select tool
+    AGENTBOX_TOOL=pi agentbox            # Use env var to select tool
 
 Environment variables (set in ~/.agentbox/.env or <project>/.env):
     AGENTBOX_EXTRA_HOSTS    Comma-separated host:ip pairs added to container /etc/hosts
                             Example: gitlab.example.com:host-gateway
     AGENTBOX_CONFIG_PROFILE Name of a config profile under ~/.agentbox/profiles/
-                            Mounts an isolated set of claude/opencode config and auth
+                            Mounts an isolated set of claude/opencode/pi config and auth
                             directories. Useful for separating personal vs. work accounts
                             or per-project API keys. Overridden by --config-profile.
 
@@ -718,7 +740,7 @@ main() {
             --tool)
                 shift
                 if [[ -z "${1:-}" ]]; then
-                    log_error "--tool requires a value (claude or opencode)"
+                    log_error "--tool requires a value (claude, opencode, or pi)"
                     exit 1
                 fi
                 tool="$1"
@@ -761,8 +783,8 @@ main() {
     done
 
     # Validate tool selection
-    if [[ "$tool" != "claude" && "$tool" != "opencode" ]]; then
-        log_error "Invalid tool: $tool (must be 'claude' or 'opencode')"
+    if [[ "$tool" != "claude" && "$tool" != "opencode" && "$tool" != "pi" ]]; then
+        log_error "Invalid tool: $tool (must be 'claude', 'opencode', or 'pi')"
         exit 1
     fi
 
